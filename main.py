@@ -1,8 +1,7 @@
 #импорт библиотек
 import asyncio #асинхроность
 import logging #логирование
-import datetime
-from datetime import timedelta  #работа со временем
+import datetime #работа со временем
 
 
 #aiogram и всё утилиты для коректной работы с Telegram API
