@@ -1,7 +1,9 @@
 #импорт библиотек
 import asyncio #асинхроность
 import logging #логирование
-import datetime #работа со временем
+import datetime
+from datetime import timedelta  #работа со временем
+import random
 
 
 #aiogram и всё утилиты для коректной работы с Telegram API
@@ -20,6 +22,8 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import config
 #работа с базой данных
 from database import dbworker
+
+
 #задаём логи
 logging.basicConfig(level=logging.INFO)
 
@@ -30,17 +34,25 @@ dp = Dispatcher(bot,storage=MemoryStorage())
 #инициализируем базу данных
 db = dbworker('db.db')
 
-#кнопки
-button_search = KeyboardButton('Найти хату🔍')
-button_create_hata = KeyboardButton('Создать хату🏠')
-button_delete_hata = KeyboardButton('Удалить хату❌')
 
-all_btn = ReplyKeyboardMarkup()
-all_btn.add(button_search,button_create_hata,button_delete_hata)
 
 #хендлер команды /start
-@dp.message_handler(commands=['start'])
+@dp.message_handler(commands=['start'],state='*')
 async def start(message : types.Message):
+	print(message.from_user.username)
+	#кнопки
+	button_search = KeyboardButton('Найти хату🔍')
+	button_create_hata = KeyboardButton('Создать хату🏠')
+	button_delete_hata = KeyboardButton('Удалить хату❌')
+
+	all_btn = ReplyKeyboardMarkup()
+
+	if db.hata_exists(message.from_user.id):
+
+		all_btn.add(button_search,button_create_hata,button_delete_hata)
+	else:
+		all_btn.add(button_search,button_create_hata)
+
 	await message.answer('Привет, это ищу хату бот и тут ты легко можешь найти убежище для совместного отдыха или также разыскать однобутыльцев для вписона🍾\n',reply_markup=all_btn)
 	if(not db.subscriber_exists(message.from_user.id)):
 		#если юзера нет в базе добавляем его
@@ -52,7 +64,7 @@ class CreateHata(StatesGroup):
     data = State()
     city = State()
     photo = State()
-@dp.message_handler(lambda message: message.text.startswith('Создать хату🏠'))
+@dp.message_handler(lambda message: message.text.startswith('Создать хату🏠'),state='*')
 async def create_hata(message: types.Message):
 	if(not db.hata_exists(message.from_user.id)):
 		await message.answer("Для того что бы создать хату нужно заполнить несколько пунктов\nДавайте начнём с названия, введите желаемое названия для вашего треп хауса😉")
@@ -89,11 +101,14 @@ async def create_hata_description(message: types.Message, state: FSMContext):
 @dp.message_handler(state=CreateHata.data)
 async def create_hata_data(message: types.Message, state: FSMContext):
 	if message.text == 'Сегодня' or message.text == 'Завтра' or message.text == 'Послезавтра':
-		await state.update_data(hata_data=message.text)
-		#user_data = await state.get_data()
-		#db.create_hata(message.from_user.id,str(user_data['hata_description']),str(user_data['hata_name']),str(user_data['hata_data']))
+		if message.text == 'Сегодня':
+			await state.update_data(hata_data=datetime.date.today())
+		elif message.text == 'Завтра':
+			await state.update_data(hata_data=datetime.date.today() + timedelta(days=1))
+		elif message.text == 'Послезавтра':
+			await state.update_data(hata_data=datetime.date.today() + timedelta(days=2))
+
 		await message.reply('Прекрасно,осталось лишь понять где находится твоё чудное место\nУкажи город, где находится твой Вписка Хаус =)')
-		#await state.finish()
 		await CreateHata.next()
 	else:
 		await message.answer('Повторите ещё раз!')
@@ -101,27 +116,119 @@ async def create_hata_data(message: types.Message, state: FSMContext):
 		return
 @dp.message_handler(state=CreateHata.city)
 async def create_hata_city(message: types.Message, state: FSMContext):
+	#проверка на длину строки города
 	if len(message.text) < 35:
+		user_name = message.from_user.username
 		await state.update_data(hata_city=message.text.lower())
 		user_data = await state.get_data()
 		await message.answer('Анкета успешно создана!')
-		db.create_hata(message.from_user.id,str(user_data['hata_description']),str(user_data['hata_name']),str(user_data['hata_data']),str(user_data['hata_city']))
+		#запрос на создания строки в бд
+		db.create_hata(message.from_user.id,str(user_data['hata_description']),str(user_data['hata_name']),str(user_data['hata_data']),str(user_data['hata_city']),user_name,datetime.date.today())
+		#конец state линии
 		await state.finish()
 	else:
 		await message.answer('Повторите ещё раз!')
 		#прерывание функции
 		return
-@dp.message_handler(lambda message : message.text == 'Удалить хату❌')
+@dp.message_handler(lambda message : message.text == 'Удалить хату❌',state='*')
 async def delete_hata(message: types.Message):
-	db.delete_hata(message.from_user.id)
-	await message.answer('Ваша хата была удалена!')
+	if db.hata_exists(message.from_user.id):
+		db.delete_hata(message.from_user.id)
+		await message.answer('Ваша хата была удалена!')
+	else:
+		await message.answer('У тебя и так её нет :(\n(хы-хы)')
 
+#хендлеры для поиска хаты
+class SearchHata(StatesGroup):
+	city_for_search = State()
+@dp.message_handler(lambda message : message.text == 'Найти хату🔍',state='*')
+async def search_hata(message: types.Message):
+	await message.answer('Для поиска хаты впишите город, где вы хотите трепить)')
+	await SearchHata.city_for_search.set()
+class ID_hata(StatesGroup):
+	id = State()
+@dp.message_handler(state=SearchHata.city_for_search)
+async def create_hata_city(message: types.Message, state: FSMContext):
+	#проверка на длину строки города
+	if len(message.text) < 35:
+		try:
+			await state.update_data(search_hata_city=message.text.lower())
+			user_data = await state.get_data()
+			if bool(len(db.search_hata(user_data['search_hata_city'],'hata_id'))):
+				all_hata_in_city_final = ''
+
+				for i in range(0,db.count_hata(str(user_data['search_hata_city']))):
+					all_hata_in_city_id = str(db.search_hata(str(user_data['search_hata_city']),'hata_id')[i][0])
+					all_hata_in_city_name = str(db.search_hata(str(user_data['search_hata_city']),'name_hata')[i][0])
+					all_hata_in_city_descp = str(db.search_hata(str(user_data['search_hata_city']),'description')[i][0])
+					all_hata_in_city_data = str(db.search_hata(str(user_data['search_hata_city']),'data_fr_delete')[i][0])
+					if all_hata_in_city_data == str(datetime.date.today()):
+						all_hata_in_city_data = 'Сегодня'
+					elif all_hata_in_city_data == str(datetime.date.today() + timedelta(days=1)):
+						all_hata_in_city_data = 'Завтра'
+					elif all_hata_in_city_data == str(datetime.date.today() + timedelta(days=2)):
+						all_hata_in_city_data  = 'Послезавтра'
+					all_hata_in_city_final = all_hata_in_city_final + 'Айдишник - ' + all_hata_in_city_id + '\nНазвание - ' + all_hata_in_city_name + '\nОписание - ' + all_hata_in_city_descp + '\nВремя проведения - ' + all_hata_in_city_data + '\n#-#-#-#-#-#-#-#-#-#-#-#\n'
+				
+				#кнопки
+				button_funny_alert = KeyboardButton('Да,да написать прям тут☝️')
+
+				all_btn = ReplyKeyboardMarkup()
+				all_btn.add(button_funny_alert)					
+
+				await message.answer('Для того что бы выбрать желаемую - впиши ID.\nВсе тусы в городе ' + str(user_data['search_hata_city']).title() + ':\n\n' + all_hata_in_city_final,reply_markup=all_btn)
+				#конец state линии
+				await state.finish()
+				await ID_hata.id.set()
+			else:
+				await message.answer('В этом городе не тус!')
+		except:
+			await message.answer('В этом городе нету хат или ты допустил ошибку!')
+	else:
+		await message.answer('Повторите ещё раз!')
+		#прерывание функции
+		return
+@dp.message_handler(state=ID_hata.id)
+async def hata_search_id_send(message: types.Message, state: FSMContext):
+	await state.update_data(hata_id_for_search=message.text)
+	user_data = await state.get_data()
+	try:
+		if int(user_data['hata_id_for_search']) in range(1,99999):
+			try : 
+				search_id_request = db.search_hata_id(str(user_data['hata_id_for_search']))[0]
+				await message.answer('Надеюсь хорошо проведете время ;)\nСписывайтесь,договаривайтесь,ваше здоровье🍻\nЧего ты ждёшь - @' + str(search_id_request))
+				#конец state линии
+				await state.finish()
+			except:
+				await message.answer('Попробуй ещё')
+				return
+		else:
+			await message.answer('Попробуй ещё')
+			return
+	except:
+		await message.answer('Попробуй ещё')
+#функция для удаление устаревших хат
+async def hata_timer(wait_for):
+	while True:
+		await asyncio.sleep(wait_for)
+		now = datetime.date.today()
+
+		db.delete_hata_timer(str(now - timedelta(days=1)))
+		
+
+
+
+
+@dp.message_handler(lambda message : message.text == 'Да,да написать прям тут☝️',state='*')
+async def funny_alert(message : types.Message):
+	funny_list = ['Да не сюда тыкать, а написать в чат!😡','Ты чё совсем *#*#43*~* писать вверху','В чат пиши блин,буковками вверху!!!']
+	await message.answer(random.choice(funny_list))
 
 #хендлер который срабатывает при непредсказуемом запросе юзера
 @dp.message_handler()
 async def end(message : types.Message):
 	await message.answer('Я не знаю, что с этим делать 😲\nЯ просто напомню, что есть команда /help =)',parse_mode=ParseMode.MARKDOWN)
 
-
-#запуск полинга бота		
+#запуск полинга бота
+dp.loop.create_task(hata_timer(600))	
 executor.start_polling(dp, skip_updates=True)
