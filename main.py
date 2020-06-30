@@ -4,6 +4,8 @@ import logging #логирование
 import datetime
 from datetime import timedelta  #работа со временем
 import random
+#работа с кастом названиями
+import custom_answer
 
 
 #aiogram и всё утилиты для коректной работы с Telegram API
@@ -34,18 +36,20 @@ dp = Dispatcher(bot,storage=MemoryStorage())
 #инициализируем базу данных
 db = dbworker('db.db')
 
+#кнопка для отмены
+button_close = KeyboardButton('Отменить❌')
 
+close_btn = ReplyKeyboardMarkup(one_time_keyboard=True)
 
 #хендлер команды /start
 @dp.message_handler(commands=['start'],state='*')
 async def start(message : types.Message):
-	print(message.from_user.username)
-	#кнопки
+	#кнопки для меню
 	button_search = KeyboardButton('Найти хату🔍')
 	button_create_hata = KeyboardButton('Создать хату🏠')
 	button_delete_hata = KeyboardButton('Удалить хату❌')
 
-	all_btn = ReplyKeyboardMarkup()
+	all_btn = ReplyKeyboardMarkup(one_time_keyboard=True)
 
 	if db.hata_exists(message.from_user.id):
 
@@ -54,23 +58,31 @@ async def start(message : types.Message):
 		all_btn.add(button_search,button_create_hata)
 
 	await message.answer('Привет, это ищу хату бот и тут ты легко можешь найти убежище для совместного отдыха или также разыскать однобутыльцев для вписона🍾\n',reply_markup=all_btn)
-	if(not db.subscriber_exists(message.from_user.id)):
+	if(not db.user_exists(message.from_user.id)):
 		#если юзера нет в базе добавляем его
-		db.add_subscriber(message.from_user.id)
+		db.add_user(message.from_user.username,message.from_user.id,message.from_user.full_name)
+
+
 #Хендлеры для создания хаты
+
+
 class CreateHata(StatesGroup):
     name = State()
     description = State()
     data = State()
     city = State()
     photo = State()
+    social_link = State()
 @dp.message_handler(lambda message: message.text.startswith('Создать хату🏠'),state='*')
 async def create_hata(message: types.Message):
-	if(not db.hata_exists(message.from_user.id)):
-		await message.answer("Для того что бы создать хату нужно заполнить несколько пунктов\nДавайте начнём с названия, введите желаемое названия для вашего треп хауса😉")
-		await CreateHata.name.set()
-	elif(db.subscriber_exists(message.from_user.id)) :
-		await message.answer('У тебя уже есть активная хата!')
+	if message.from_user.username != None:
+		if(not db.hata_exists(message.from_user.id)):
+			await message.answer("Для того что бы создать хату нужно заполнить несколько пунктов\nДавайте начнём с названия, введите желаемое названия для вашего треп хауса😉")
+			await CreateHata.name.set()
+		elif(db.hata_exists(message.from_user.id)) :
+			await message.answer('У тебя уже есть активная хата!')
+	else:
+		await message.answer('‼️У вас не заполнен username в телеграм!\n\nПожалуйста сделайте это для коректного функционирования бота\nДля этого зайдите в настройки -> Edit Profile(Изменить профиль) и жмякайте add username\n\nТам вводите желаемый никнейм и вуаля')
 @dp.message_handler(state=CreateHata.name)
 async def create_hata_name(message: types.Message, state: FSMContext):
 	if len(message.text) < 35: 
@@ -78,24 +90,24 @@ async def create_hata_name(message: types.Message, state: FSMContext):
 		await message.reply(message.text + ' - прекрасное название\nТеперь нужно заполнить описание👇\nбез этого никак прости :9')
 		await CreateHata.next()
 	else:
-		await message.answer('Повторите ещё раз!')
+		await message.answer(custom_answer.random_reapeat_list())
 		#прерывание функции
 		return
 @dp.message_handler(state=CreateHata.description)
 async def create_hata_description(message: types.Message, state: FSMContext):
 	if len(message.text) < 250:
 		await state.update_data(hata_description=message.text)
-		now = datetime.datetime.now()
+
 		button_to_day = KeyboardButton('Сегодня')
 		button_tomorrow = KeyboardButton('Завтра')
 		button_after_tomorrow = KeyboardButton('Послезавтра')
 
-		all_btn = ReplyKeyboardMarkup()
-		all_btn.add(button_to_day,button_tomorrow,button_after_tomorrow)
-		await message.reply('Ебнутое описание,предлагаю заполнить дату, когда пройдят твоя вечеринка с бассеином(или без:) и на этом эта мучительное заполнение закончится\nДля этого нажми на любую кнопку внизу',reply_markup=all_btn)
+		all_btn_days = ReplyKeyboardMarkup(one_time_keyboard=True)
+		all_btn_days.add(button_to_day,button_tomorrow,button_after_tomorrow)
+		await message.reply('Ебнутое описание,предлагаю заполнить дату, когда пройдят твоя вечеринка с бассеином(или без:) и на этом эта мучительное заполнение закончится\nДля этого нажми на любую кнопку внизу',reply_markup=all_btn_days)
 		await CreateHata.next()
 	else:
-		await message.answer('Повторите ещё раз!')
+		await message.answer(custom_answer.random_reapeat_list())
 		#прерывание функции
 		return
 @dp.message_handler(state=CreateHata.data)
@@ -111,30 +123,47 @@ async def create_hata_data(message: types.Message, state: FSMContext):
 		await message.reply('Прекрасно,осталось лишь понять где находится твоё чудное место\nУкажи город, где находится твой Вписка Хаус =)')
 		await CreateHata.next()
 	else:
-		await message.answer('Повторите ещё раз!')
+		await message.answer(custom_answer.random_reapeat_list())
 		#прерывание функции
 		return
 @dp.message_handler(state=CreateHata.city)
 async def create_hata_city(message: types.Message, state: FSMContext):
 	#проверка на длину строки города
 	if len(message.text) < 35:
+		#кнопки для меню 
+
+		button_search = KeyboardButton('Все хаты🔍')
+		button_create_hata = KeyboardButton('Создать хату🏠')
+		button_delete_hata = KeyboardButton('Удалить хату❌')
+
+		all_btn_menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+
 		user_name = message.from_user.username
 		await state.update_data(hata_city=message.text.lower())
 		user_data = await state.get_data()
-		await message.answer('Анкета успешно создана!')
+		await message.answer('Анкета успешно создана!',reply_markup=all_btn_menu)
 		#запрос на создания строки в бд
 		db.create_hata(message.from_user.id,str(user_data['hata_description']),str(user_data['hata_name']),str(user_data['hata_data']),str(user_data['hata_city']),user_name,datetime.date.today())
 		#конец state линии
 		await state.finish()
 	else:
-		await message.answer('Повторите ещё раз!')
+		await message.answer(custom_answer.random_reapeat_list)
 		#прерывание функции
 		return
+
+#Удаление хаты
 @dp.message_handler(lambda message : message.text == 'Удалить хату❌',state='*')
 async def delete_hata(message: types.Message):
+	#кнопки для меню
+	button_search = KeyboardButton('Найти хату🔍')
+	button_create_hata = KeyboardButton('Создать хату🏠')
+	button_delete_hata = KeyboardButton('Удалить хату❌')
+
+	all_btn_menu = ReplyKeyboardMarkup(one_time_keyboard=True)
+
 	if db.hata_exists(message.from_user.id):
 		db.delete_hata(message.from_user.id)
-		await message.answer('Ваша хата была удалена!')
+		await message.answer('Ваша хата была удалена!',reply_markup=all_btn_menu  )
 	else:
 		await message.answer('У тебя и так её нет :(\n(хы-хы)')
 
@@ -185,28 +214,28 @@ async def create_hata_city(message: types.Message, state: FSMContext):
 		except:
 			await message.answer('В этом городе нету хат или ты допустил ошибку!')
 	else:
-		await message.answer('Повторите ещё раз!')
+		await message.answer(custom_answer.random_reapeat_list())
 		#прерывание функции
 		return
+#Хедлер для фи
 @dp.message_handler(state=ID_hata.id)
 async def hata_search_id_send(message: types.Message, state: FSMContext):
 	await state.update_data(hata_id_for_search=message.text)
 	user_data = await state.get_data()
 	try:
 		if int(user_data['hata_id_for_search']) in range(1,99999):
-			try : 
+			try:	
 				search_id_request = db.search_hata_id(str(user_data['hata_id_for_search']))[0]
-				await message.answer('Надеюсь хорошо проведете время ;)\nСписывайтесь,договаривайтесь,ваше здоровье🍻\nЧего ты ждёшь - @' + str(search_id_request))
-				#конец state линии
-				await state.finish()
 			except:
-				await message.answer('Попробуй ещё')
-				return
-		else:
-			await message.answer('Попробуй ещё')
-			return
-	except:
-		await message.answer('Попробуй ещё')
+				search_id_request = 'нету('
+			await message.answer('Надеюсь хорошо проведете время ;)\nСписывайтесь,договаривайтесь,ваше здоровье🍻\nЧего ты ждёшь - @' + str(search_id_request))
+			await bot.send_message(db.search_hata_tg_id(str(user_data['hata_id_for_search']))[0],'Твоей хатой заинтеравлся пользователь @' + str(message.from_user.username))
+			return 
+			await state.finish()	
+	except Exception as e:
+		await message.answer(custom_answer.random_reapeat_list())
+		print(e)
+		return
 #функция для удаление устаревших хат
 async def hata_timer(wait_for):
 	while True:
@@ -214,11 +243,7 @@ async def hata_timer(wait_for):
 		now = datetime.date.today()
 
 		db.delete_hata_timer(str(now - timedelta(days=1)))
-		
-
-
-
-
+#хендлер для рофла)		
 @dp.message_handler(lambda message : message.text == 'Да,да написать прям тут☝️',state='*')
 async def funny_alert(message : types.Message):
 	funny_list = ['Да не сюда тыкать, а написать в чат!😡','Ты чё совсем *#*#43*~* писать вверху','В чат пиши блин,буковками вверху!!!']
